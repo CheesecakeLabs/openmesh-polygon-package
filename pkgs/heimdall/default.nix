@@ -3,7 +3,7 @@
 let
 
 in buildGoModule rec {
-  pname = "polygon-heimdall";
+  pname = "heimdall";
   version = "1.0.7";
 
   src = fetchFromGitHub {
