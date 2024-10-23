@@ -1,134 +1,168 @@
+{ config, lib, pkgs, ... }:
+
+let
+  heimdallOpts = { config, lib, name, ... }: {
+    options = {
+      enable = lib.mkEnableOption "Polygon Heimdall Node";
+
+      chain-id = lib.mkOption {
+        type = lib.types.int;
+        default = 137;
+        description = "Chain ID of the Polygon network (e.g., 137 for mainnet, 80001 for Mumbai testnet).";
+      };
+
+      configFile = lib.mkOption {
+        type = lib.types.path;
+        description = "Path to the TOML configuration file for Heimdall.";
+      };
+
+      datadir = lib.mkOption {
+        type = lib.types.str;
+        default = "/var/lib/heimdall";
+        description = "Path to the Heimdall data directory.";
+      };
+
+      db-backend = lib.mkOption {
+        type = lib.types.str;
+        default = "leveldb";
+        description = "Database backend used by Heimdall ('leveldb' or 'pebble').";
+      };
+
+      rpc-address = lib.mkOption {
+        type = lib.types.str;
+        default = "127.0.0.1";
+        description = "Listen address for Heimdall RPC API.";
+      };
+
+      rpc-port = lib.mkOption {
+        type = lib.types.port;
+        default = 1317;
+        description = "Port for Heimdall RPC API.";
+      };
+
+      grpc-address = lib.mkOption {
+        type = lib.types.str;
+        default = "127.0.0.1";
+        description = "Address for Heimdall gRPC API.";
+      };
+
+      grpc-port = lib.mkOption {
+        type = lib.types.port;
+        default = 9090;
+        description = "Port for Heimdall gRPC API.";
+      };
+
+      validator = lib.mkOption {
+        type = lib.types.str;
+        description = "Public address of the validator on the Polygon network.";
+      };
+
+      keystore = lib.mkOption {
+        type = lib.types.str;
+        default = "/var/lib/heimdall/keystore";
+        description = "Path to the keystore directory containing the validator key.";
+      };
+
+      seeds = lib.mkOption {
+        type = lib.types.str;
+        default = "seed1.polygon.io:26656,seed2.polygon.io:26656";
+        description = "Seed nodes for connecting Heimdall to the Polygon network.";
+      };
+
+      log-level = lib.mkOption {
+        type = lib.types.str;
+        default = "info";
+        description = "Log level for Heimdall (trace|debug|info|warn|error|crit).";
+      };
+
+      verbosity = lib.mkOption {
+        type = lib.types.int;
+        default = 3;
+        description = "Logging verbosity for Heimdall (5=trace, 4=debug, 3=info, 2=warn, 1=error, 0=crit).";
+      };
+
+      snapshot = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = "Enable snapshot-database mode for fast sync.";
+      };
+
+      tx-index = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = "Enable transaction indexing.";
+      };
+
+      fast-sync = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = "Enable fast sync mode.";
+      };
+
+      network = lib.mkOption {
+        type = lib.types.str;
+        default = "mainnet";
+        description = "The network type (e.g., 'mainnet', 'mumbai').";
+      };
+
+      extraArgs = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [];
+        description = "Additional arguments to pass to the Heimdall executable.";
+      };
+    };
+  };
+in
 {
-  config,
-  lib,
-  pkgs,
-  ...
-}: let
-  modulesLib = import ../lib.nix lib;
+  options.services.heimdall = lib.mkOption {
+    type = lib.types.attrsOf (lib.types.submodule heimdallOpts);
+    default = {};
+    description = "Configuration for Polygon Heimdall nodes.";
+  };
 
-  inherit (lib.lists) optionals findFirst;
-  inherit (lib.strings) hasPrefix;
-  inherit (lib.attrsets) zipAttrsWith;
-  inherit
-    (lib)
-    concatStringsSep
-    filterAttrs
-    flatten
-    mapAttrs'
-    mapAttrsToList
-    mkIf
-    mkMerge
-    nameValuePair
-    ;
-  inherit (modulesLib) mkArgs baseServiceConfig;
+  config = lib.mkIf (config.services.heimdall != {}) {
+    environment.systemPackages = lib.flatten (lib.mapAttrsToList (name: cfg: [
+      pkgs.heimdall
+    ]) config.services.heimdall);
 
-  # capture config for all configured Heimdall nodes
-  eachHeimdall = config.services.heimdall;
-in {
-  ###### interface
-  inherit (import ./options.nix {inherit lib pkgs;}) options;
+    systemd.services = lib.mapAttrs' (name: cfg: let
+      dataDir = cfg.datadir;
+    in (
+      lib.nameValuePair "heimdall-${name}" (lib.mkIf cfg.enable {
+        description = "Polygon Heimdall Node (${name})";
+        after = [ "network.target" ];
+        wantedBy = [ "multi-user.target" ];
 
-  ###### implementation
+        serviceConfig = {
+          DynamicUser = true;
+          Restart = "always";
+          StateDirectory = "heimdall";
+          ProtectSystem = "full";
+          PrivateTmp = true;
+          NoNewPrivileges = true;
+          PrivateDevices = true;
+          MemoryDenyWriteExecute = true;
+        };
 
-  config = mkIf (eachHeimdall != {}) {
-    # configure the firewall for each service
-    networking.firewall = let
-      openFirewall = filterAttrs (_: cfg: cfg.openFirewall) eachHeimdall;
-      perService =
-        mapAttrsToList
-        (
-          _: cfg:
-            with cfg.args; {
-              allowedUDPPorts = [port];
-              allowedTCPPorts =
-                [port rpc.port]
-                ++ (optionals prometheus.enable [prometheus.port])
-                ++ (optionals p2p.enable [p2p.port]);
-            }
-        )
-        openFirewall;
-    in
-      zipAttrsWith (_name: flatten) perService;
-
-    # create a service for each instance
-    systemd.services =
-      mapAttrs'
-      (
-        heimdallName: let
-          serviceName = "heimdall-${heimdallName}";
-        in
-          cfg: let
-            scriptArgs = let
-              # replace enable flags like --rpc.enable with just --rpc
-              pathReducer = path: let
-                arg = concatStringsSep "." (lib.lists.remove "enable" path);
-              in "--${arg}";
-
-              # generate flags
-              args = let
-                opts = import ./args.nix lib;
-              in
-                mkArgs {
-                  inherit pathReducer opts;
-                  inherit (cfg) args;
-                };
-
-              # filter out certain args which need to be treated differently
-              specialArgs = ["--network" "--node_key" "--priv_validator_key"];
-              isNormalArg = name: (findFirst (arg: hasPrefix arg name) null specialArgs) == null;
-
-              filteredArgs = builtins.filter isNormalArg args;
-
-              network =
-                if cfg.args.network != null
-                then "--network ${cfg.args.network}"
-                else "";
-
-              nodeKey =
-                if cfg.args.node_key != null
-                then "--node_key ${cfg.args.node_key}"
-                else "";
-
-              privValidatorKey =
-                if cfg.args.priv_validator_key != null
-                then "--priv_validator_key ${cfg.args.priv_validator_key}"
-                else "";
-
-              datadir =
-                if cfg.args.data_dir != null
-                then "--data_dir ${cfg.args.data_dir}"
-                else "--data_dir %S/${serviceName}";
-            in ''
-              ${datadir} \
-              ${network} ${nodeKey} ${privValidatorKey} \
-              ${concatStringsSep " \\\n" filteredArgs} \
-              ${lib.escapeShellArgs cfg.extraArgs}
-            '';
-          in
-            nameValuePair serviceName (mkIf cfg.enable {
-              after = ["network.target"];
-              wantedBy = ["multi-user.target"];
-              description = "Polygon Heimdall node (${heimdallName})";
-
-              environment = {
-                RPC_HTTP_HOST = cfg.args.rpc.addr;
-                RPC_HTTP_PORT = builtins.toString cfg.args.rpc.port;
-              };
-
-              # create service config by merging with the base config
-              serviceConfig = mkMerge [
-                baseServiceConfig
-                {
-                  User = serviceName;
-                  StateDirectory = serviceName;
-                  ExecStart = "${cfg.package}/bin/heimdalld ${scriptArgs}";
-                }
-                (mkIf (cfg.args.node_key != null) {
-                  LoadCredential = ["node_key:${cfg.args.node_key}"];
-                })
-              ];
-            })
-      )
-      eachHeimdall;
+        script = ''
+          ${pkgs.heimdall}/bin/heimdalld \
+            --datadir ${dataDir} \
+            --chain-id ${toString cfg.chain-id} \
+            --rpc.address ${cfg.rpc-address} \
+            --rpc.port ${toString cfg.rpc-port} \
+            --grpc.address ${cfg.grpc-address} \
+            --grpc.port ${toString cfg.grpc-port} \
+            --validator ${cfg.validator} \
+            --keystore ${cfg.keystore} \
+            --seeds ${cfg.seeds} \
+            --log-level ${cfg.log-level} \
+            --verbosity ${toString cfg.verbosity} \
+            ${lib.optionalString cfg.snapshot "--snapshot"} \
+            ${lib.optionalString cfg.tx-index "--tx-index"} \
+            ${lib.optionalString cfg.fast-sync "--fast-sync"} \
+            ${lib.escapeShellArgs cfg.extraArgs}
+        '';
+      })
+    )) config.services.heimdall;
   };
 }
