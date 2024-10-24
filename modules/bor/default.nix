@@ -1,130 +1,121 @@
+{ config, lib, pkgs, ... }:
+
+let
+  borOpts = { config, lib, name, ... }: {
+    options = {
+      enable = lib.mkEnableOption "Polygon Bor Node";
+
+      chain = lib.mkOption {
+        type = lib.types.str;
+        default = "mainnet";
+        description = "Name of the chain to sync ('amoy', 'mumbai', 'mainnet') or path to a genesis file.";
+      };
+
+      configFile = lib.mkOption {
+        type = lib.types.path;
+        description = "Path to the TOML configuration file.";
+      };
+
+      datadir = lib.mkOption {
+        type = lib.types.path;
+        default = "/var/lib/bor";
+        description = "Path of the data directory to store blockchain data.";
+      };
+
+      heimdall = lib.mkOption {
+        type = lib.types.str;
+        default = "http://localhost:1317";
+        description = "URL of the Heimdall service.";
+      };
+
+      grpcAddr = lib.mkOption {
+        type = lib.types.str;
+        default = ":3131";
+        description = "Address and port to bind the GRPC server.";
+      };
+
+      logs = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = "Enables Bor log retrieval.";
+      };
+
+      runheimdall = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = "Run Heimdall service as a child process.";
+      };
+
+      syncmode = lib.mkOption {
+        type = lib.types.str;
+        default = "full";
+        description = "Blockchain sync mode (only 'full' is supported by Bor).";
+      };
+
+      gcmode = lib.mkOption {
+        type = lib.types.str;
+        default = "full";
+        description = "Blockchain garbage collection mode.";
+      };
+
+      verbosity = lib.mkOption {
+        type = lib.types.int;
+        default = 3;
+        description = "Logging verbosity for the server (5=trace, 4=debug, 3=info, 2=warn, 1=error, 0=crit).";
+      };
+
+      extraArgs = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [];
+        description = "Additional arguments passed to the Bor executable.";
+      };
+    };
+  };
+in
 {
-  config,
-  lib,
-  pkgs,
-  ...
-}: let
-  modulesLib = import ../lib.nix lib;
+  options.services.bor = lib.mkOption {
+    type = lib.types.attrsOf (lib.types.submodule borOpts);
+    default = {};
+    description = "Configuration for Polygon Bor nodes.";
+  };
 
-  inherit (lib.lists) optionals findFirst;
-  inherit (lib.strings) hasPrefix;
-  inherit (lib.attrsets) zipAttrsWith;
-  inherit
-    (lib)
-    concatStringsSep
-    filterAttrs
-    flatten
-    mapAttrs'
-    mapAttrsToList
-    mkIf
-    mkMerge
-    nameValuePair
-    ;
-  inherit (modulesLib) mkArgs baseServiceConfig;
+  config = lib.mkIf (config.services.bor != {}) {
+    environment.systemPackages = lib.flatten (lib.mapAttrsToList (name: cfg: [
+      pkgs.bor
+    ]) config.services.bor);
 
-  # capture config for all configured bors
-  eachBor = config.services.polygon-bor;
-in {
-  ###### interface
-  inherit (import ./options.nix {inherit lib pkgs;}) options;
+    systemd.services = lib.mapAttrs' (name: cfg: let
+      dataDir = cfg.datadir;
+    in (
+      lib.nameValuePair "bor-${name}" (lib.mkIf cfg.enable {
+        description = "Polygon Bor Node (${name})";
+        after = [ "network.target" ];
+        wantedBy = [ "multi-user.target" ];
 
-  ###### implementation
+        serviceConfig = {
+          DynamicUser = true;
+          Restart = "always";
+          StateDirectory = "bor";
+          ProtectSystem = "full";
+          PrivateTmp = true;
+          NoNewPrivileges = true;
+          PrivateDevices = true;
+          MemoryDenyWriteExecute = true;
+        };
 
-  config = mkIf (eachBor != {}) {
-    # configure the firewall for each service
-    networking.firewall = let
-      openFirewall = filterAttrs (_: cfg: cfg.openFirewall) eachBor;
-      perService =
-        mapAttrsToList
-        (
-          _: cfg:
-            with cfg.args; {
-              allowedUDPPorts = [port];
-              allowedTCPPorts =
-                [port authrpc.port]
-                ++ (optionals http.enable [http.port])
-                ++ (optionals ws.enable [ws.port])
-                ++ (optionals metrics.enable [metrics.port]);
-            }
-        )
-        openFirewall;
-    in
-      zipAttrsWith (_name: flatten) perService;
-
-    # create a service for each instance
-    systemd.services =
-      mapAttrs'
-      (
-        borName: let
-          serviceName = "bor-${borName}";
-        in
-          cfg: let
-            scriptArgs = let
-              # replace enable flags like --http.enable with just --http
-              pathReducer = path: let
-                arg = concatStringsSep "." (lib.lists.remove "enable" path);
-              in "--${arg}";
-
-              # generate flags
-              args = let
-                opts = import ./args.nix lib;
-              in
-                mkArgs {
-                  inherit pathReducer opts;
-                  inherit (cfg) args;
-                };
-
-              # filter out certain args which need to be treated differently
-              specialArgs = ["--network" "--authrpc.jwtsecret"];
-              isNormalArg = name: (findFirst (arg: hasPrefix arg name) null specialArgs) == null;
-
-              filteredArgs = builtins.filter isNormalArg args;
-
-              network =
-                if cfg.args.network != null
-                then "--${cfg.args.network}"
-                else "";
-
-              jwtSecret =
-                if cfg.args.authrpc.jwtsecret != null
-                then "--authrpc.jwtsecret %d/jwtsecret"
-                else "";
-
-              datadir =
-                if cfg.args.datadir != null
-                then "--datadir ${cfg.args.datadir}"
-                else "--datadir %S/${serviceName}";
-            in ''
-              ${datadir} \
-              --ipcdisable ${network} ${jwtSecret} \
-              ${concatStringsSep " \\\n" filteredArgs} \
-              ${lib.escapeShellArgs cfg.extraArgs}
-            '';
-          in
-            nameValuePair serviceName (mkIf cfg.enable {
-              after = ["network.target"];
-              wantedBy = ["multi-user.target"];
-              description = "Polygon Bor node (${borName})";
-
-              environment = {
-                WEB3_HTTP_HOST = cfg.args.http.addr;
-                WEB3_HTTP_PORT = builtins.toString cfg.args.http.port;
-              };
-
-              # create service config by merging with the base config
-              serviceConfig = mkMerge [
-                baseServiceConfig
-                {
-                  User = serviceName;
-                  StateDirectory = serviceName;
-                  ExecStart = "${cfg.package}/bin/bor ${scriptArgs}";
-                }
-                (mkIf (cfg.args.authrpc.jwtsecret != null) {
-                  LoadCredential = ["jwtsecret:${cfg.args.authrpc.jwtsecret}"];
-                })
-              ];
-            })
-      )
-      eachBor;
+        script = ''
+          ${pkgs.bor}/bin/bor \
+            --datadir ${dataDir} \
+            --chain ${cfg.chain} \
+            --verbosity ${toString cfg.verbosity} \
+            --syncmode ${cfg.syncmode} \
+            --gcmode ${cfg.gcmode} \
+            --heimdall ${cfg.heimdall} \
+            --grpc ${cfg.grpcAddr} \
+            ${lib.optionalString cfg.logs "--log"} \
+            ${lib.escapeShellArgs cfg.extraArgs}
+        '';
+      })
+    )) config.services.bor;
   };
 }
