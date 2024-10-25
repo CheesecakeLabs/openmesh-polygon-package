@@ -21,7 +21,6 @@
           pkgs = nixpkgsFor.${system};
         in {
           bor = import ./pkgs/bor/default.nix {
-            inherit nixpkgs pkgs;
             lib = pkgs.lib;
             stdenv = pkgs.stdenv;
             buildGoModule = pkgs.buildGoModule;
@@ -31,7 +30,6 @@
           };
 
           heimdall = import ./pkgs/heimdall/default.nix {
-            inherit nixpkgs pkgs;
             lib = pkgs.lib;
             stdenv = pkgs.stdenv;
             buildGoModule = pkgs.buildGoModule;
