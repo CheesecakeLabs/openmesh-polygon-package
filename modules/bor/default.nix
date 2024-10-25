@@ -1,49 +1,17 @@
 { config, lib, pkgs, ... }:
 
 let
+  eachBor = config.services.bor;
+
   borOpts = { config, lib, name, ... }: {
     options = {
+
       enable = lib.mkEnableOption "Polygon Bor Node";
 
       chain = lib.mkOption {
         type = lib.types.str;
         default = "mainnet";
         description = "Name of the chain to sync ('amoy', 'mumbai', 'mainnet') or path to a genesis file.";
-      };
-
-      configFile = lib.mkOption {
-        type = lib.types.path;
-        description = "Path to the TOML configuration file.";
-      };
-
-      datadir = lib.mkOption {
-        type = lib.types.path;
-        default = "/var/lib/bor";
-        description = "Path of the data directory to store blockchain data.";
-      };
-
-      heimdall = lib.mkOption {
-        type = lib.types.str;
-        default = "http://localhost:1317";
-        description = "URL of the Heimdall service.";
-      };
-
-      grpcAddr = lib.mkOption {
-        type = lib.types.str;
-        default = ":3131";
-        description = "Address and port to bind the GRPC server.";
-      };
-
-      logs = lib.mkOption {
-        type = lib.types.bool;
-        default = false;
-        description = "Enables Bor log retrieval.";
-      };
-
-      runheimdall = lib.mkOption {
-        type = lib.types.bool;
-        default = false;
-        description = "Run Heimdall service as a child process.";
       };
 
       syncmode = lib.mkOption {
@@ -58,60 +26,96 @@ let
         description = "Blockchain garbage collection mode.";
       };
 
+      grpc = {
+        address = lib.mkOption {
+          type = lib.types.str;
+          default = "127.0.0.1";
+          description = "Address for the GRPC API.";
+        };
+        port = lib.mkOption {
+          type = lib.types.port;
+          default = 3131;
+          description = "Port for the GRPC API.";
+        };
+      };
+
       verbosity = lib.mkOption {
         type = lib.types.int;
         default = 3;
-        description = "Logging verbosity for the server (5=trace, 4=debug, 3=info, 2=warn, 1=error, 0=crit).";
+        description = "Logging verbosity level (5=trace, 4=debug, 3=info, 2=warn, 1=error, 0=crit).";
+      };
+
+      heimdallUrl = lib.mkOption {
+        type = lib.types.str;
+        default = "http://localhost:1317";
+        description = "URL of the Heimdall service.";
+      };
+
+      logs = lib.mkOption {
+        type = lib.types.bool;
+        default = false;
+        description = "Enable log retrieval.";
       };
 
       extraArgs = lib.mkOption {
         type = lib.types.listOf lib.types.str;
         default = [];
-        description = "Additional arguments passed to the Bor executable.";
+        description = "Additional arguments for the Bor executable.";
       };
+
+      package = lib.mkPackageOption pkgs [ "bor" ] { };
     };
   };
-in
-{
-  options.services.bor = lib.mkOption {
-    type = lib.types.attrsOf (lib.types.submodule borOpts);
-    default = {};
-    description = "Configuration for Polygon Bor nodes.";
+
+in {
+  ###### Interface
+  options = {
+    services.bor = lib.mkOption {
+      type = lib.types.attrsOf (lib.types.submodule borOpts);
+      default = {};
+      description = "Specification of one or more Bor node instances.";
+    };
   };
 
-  config = lib.mkIf (config.services.bor != {}) {
-    environment.systemPackages = lib.flatten (lib.mapAttrsToList (name: cfg: [
-      pkgs.bor
-    ]) config.services.bor);
+  ###### Implementation
+  config = lib.mkIf (eachBor != {}) {
 
-    systemd.services = lib.mapAttrs' (name: cfg: let
-      dataDir = cfg.datadir;
+    environment.systemPackages = lib.flatten (lib.mapAttrsToList (borName: cfg: [
+      cfg.package
+    ]) eachBor);
+
+    systemd.services = lib.mapAttrs' (borName: cfg: let
+      stateDir = "polygon/bor/${borName}/${cfg.chain}";
+      dataDir = "/var/lib/${stateDir}";
     in (
-      lib.nameValuePair "bor-${name}" (lib.mkIf cfg.enable {
-        description = "Polygon Bor Node (${name})";
-        after = [ "network-online.target" ];
+      lib.nameValuePair "bor-${borName}" (lib.mkIf cfg.enable {
+        description = "Polygon Bor Node (${borName})";
         wantedBy = [ "multi-user.target" ];
+        after = [ "network-online.target" ];
         wants = [ "network-online.target" ];
 
         serviceConfig = {
           ExecStart = ''
-            ${pkgs.bor}/bin/bor \
+            ${cfg.package}/bin/bor \
               --datadir ${dataDir} \
               --chain ${cfg.chain} \
-              --verbosity ${toString cfg.verbosity} \
               --syncmode ${cfg.syncmode} \
               --gcmode ${cfg.gcmode} \
-              --heimdall ${cfg.heimdall} \
-              --grpc ${cfg.grpcAddr} \
+              --grpc.address ${cfg.grpc.address} \
+              --grpc.port ${toString cfg.grpc.port} \
+              --heimdall ${cfg.heimdallUrl} \
+              --verbosity ${toString cfg.verbosity} \
               ${lib.optionalString cfg.logs "--log"} \
               ${lib.escapeShellArgs cfg.extraArgs}
           '';
           DynamicUser = true;
           Restart = "always";
           RestartSec = 5;
-          StateDirectory = "bor";
-          ProtectSystem = "full";
+          StateDirectory = stateDir;
+
+          # Hardening options
           PrivateTmp = true;
+          ProtectSystem = "full";
           NoNewPrivileges = true;
           PrivateDevices = true;
           MemoryDenyWriteExecute = true;
@@ -120,6 +124,6 @@ in
           User = "bor";
         };
       })
-    )) config.services.bor;
+    )) eachBor;
   };
 }
