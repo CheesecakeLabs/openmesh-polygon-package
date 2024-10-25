@@ -5,7 +5,7 @@
     nixpkgs.url = "github:NixOS/nixpkgs";
   };
 
-  outputs = { self, nixpkgs, lib, ... }: 
+  outputs = { self, nixpkgs, ... }: 
   let
     # Define supported systems
     supportedSystems = [ "x86_64-linux" "x86_64-darwin" "aarch64-linux" "aarch64-darwin" ];
@@ -22,7 +22,7 @@
       ...
     }: let
       inherit (pkgs) callPackage;
-      inherit (lib.extras.flakes) platformPkgs platformApps;
+      inherit (nixpkgs.lib.extras.flakes) platformPkgs platformApps;
     in {
       packages = platformPkgs system rec {
         bor = callPackage ./pkgs/bor { inherit (pkgs.darwin) IOKit libobjc; };
