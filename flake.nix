@@ -1,4 +1,6 @@
 {
+  description = "Polygon Full Node";
+
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs";
   };
