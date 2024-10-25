@@ -42,5 +42,6 @@
 
       # NixOS modules output
       nixosModules.bor = import ./modules/bor/default.nix;
+      nixosModules.heimdall = import ./modules/heimdall/default.nix;
     };
 }
