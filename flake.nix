@@ -41,6 +41,6 @@
         polygonPackages;
 
       # NixOS modules output
-      nixosModules = import ./modules/default.nix;
+      # nixosModules = import ./modules/default.nix;
     };
 }
