@@ -5,7 +5,7 @@
     nixpkgs.url = "github:NixOS/nixpkgs";
   };
 
-  outputs = { self, nixpkgs, ... }: 
+  outputs = { self, nixpkgs, lib, ... }: 
   let
     # Define supported systems
     supportedSystems = [ "x86_64-linux" "x86_64-darwin" "aarch64-linux" "aarch64-darwin" ];
