@@ -1,9 +1,4 @@
 {
-  # create a default nixos module which mixes in all modules
-  flake.nixosModules.default = {
-    imports = [
-      ./bor
-      ./heimdall
-    ];
-  };
+  bor = import ./bor/default.nix;
+  heimdall = import ./heimdall/default.nix;
 }
