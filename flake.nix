@@ -7,40 +7,25 @@
 
   outputs =
     { self, nixpkgs, ... }:
-    {
+    let
       # Supported architectures: x86_64 and aarch64
-      packages =
+      supportedSystems = [ "x86_64-linux" "x86_64-darwin" "aarch64-linux" "aarch64-darwin" ];
+      forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
+      nixpkgsFor = forAllSystems (system: import nixpkgs { inherit system; });
+    in
+    {
+      packages = forAllSystems (system:
         let
-          systems = [
-            "aarch64-darwin"
-            "aarch64-linux"
-            "x86_64-darwin"
-            "x86_64-linux"
-          ];
-          forAllSystems = f: nixpkgs.lib.genAttrs systems (system: f system);
-
-          # Load packages for each system
-          polygonPackages = forAllSystems (
-            system:
-            let
-              pkgs = nixpkgs.legacyPackages.${system};
-            in
-            import ./pkgs/default.nix
-              {
-                inherit self nixpkgs;
-                lib = pkgs.lib;
-              }
-              .perSystem
-              {
-                self' = self;
-                pkgs = pkgs;
-                inherit system;
-              }
-          );
+          pkgs = nixpkgsFor.${system};
         in
-        polygonPackages;
+        {
+          bor = import ./pkgs/bor/default.nix { inherit self nixpkgs pkgs; };
+          heimdall = import ./pkgs/heimdall/default.nix { inherit self nixpkgs pkgs; };
+        }
+      );
 
       # NixOS modules output
-      nixosModules.default = import ./modules/default.nix;
+      nixosModules.bor = import ./modules/bor/default.nix;
+      nixosModules.heimdall = import ./modules/heimdall/default.nix;
     };
 }
