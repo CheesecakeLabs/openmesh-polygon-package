@@ -130,38 +130,42 @@ in
     in (
       lib.nameValuePair "heimdall-${name}" (lib.mkIf cfg.enable {
         description = "Polygon Heimdall Node (${name})";
-        after = [ "network.target" ];
+        after = [ "network-online.target" ];
         wantedBy = [ "multi-user.target" ];
+        wants = [ "network-online.target" ];
 
         serviceConfig = {
+          ExecStart = ''
+            ${pkgs.heimdall}/bin/heimdalld \
+              --datadir ${dataDir} \
+              --chain-id ${toString cfg.chain-id} \
+              --rpc.address ${cfg.rpc-address} \
+              --rpc.port ${toString cfg.rpc-port} \
+              --grpc.address ${cfg.grpc-address} \
+              --grpc.port ${toString cfg.grpc-port} \
+              ${lib.optionalString (cfg.validator != null) "--validator ${cfg.validator}"} \
+              --keystore ${cfg.keystore} \
+              --seeds ${cfg.seeds} \
+              --log-level ${cfg.log-level} \
+              --verbosity ${toString cfg.verbosity} \
+              ${lib.optionalString cfg.snapshot "--snapshot"} \
+              ${lib.optionalString cfg.tx-index "--tx-index"} \
+              ${lib.optionalString cfg.fast-sync "--fast-sync"} \
+              ${lib.escapeShellArgs cfg.extraArgs}
+          '';
           DynamicUser = true;
           Restart = "always";
+          RestartSec = 5;
           StateDirectory = "heimdall";
           ProtectSystem = "full";
           PrivateTmp = true;
           NoNewPrivileges = true;
           PrivateDevices = true;
           MemoryDenyWriteExecute = true;
+          StandardOutput = "journal";
+          StandardError = "journal";
+          User = "heimdall";
         };
-
-        script = ''
-          ${pkgs.heimdall}/bin/heimdalld \
-            --datadir ${dataDir} \
-            --chain-id ${toString cfg.chain-id} \
-            --rpc.address ${cfg.rpc-address} \
-            --rpc.port ${toString cfg.rpc-port} \
-            --grpc.address ${cfg.grpc-address} \
-            --grpc.port ${toString cfg.grpc-port} \
-            --validator ${cfg.validator} \
-            --keystore ${cfg.keystore} \
-            --seeds ${cfg.seeds} \
-            --log-level ${cfg.log-level} \
-            --verbosity ${toString cfg.verbosity} \
-            ${lib.optionalString cfg.snapshot "--snapshot"} \
-            ${lib.optionalString cfg.tx-index "--tx-index"} \
-            ${lib.optionalString cfg.fast-sync "--fast-sync"} \
-            ${lib.escapeShellArgs cfg.extraArgs}
-        '';
       })
     )) config.services.heimdall;
   };

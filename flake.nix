@@ -40,6 +40,18 @@
         }
       );
 
+      # Define devShell for development environments
+      devShell = forAllSystems (system: 
+        nixpkgsFor.${system}.mkShell {
+          nativeBuildInputs = [
+            self.packages.${system}.bor
+            self.packages.${system}.heimdall
+            nixpkgsFor.${system}.go
+            nixpkgsFor.${system}.git
+          ];
+        }
+      );
+
       # NixOS modules output
       nixosModules.bor = import ./modules/bor/default.nix;
       nixosModules.heimdall = import ./modules/heimdall/default.nix;

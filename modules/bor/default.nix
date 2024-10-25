@@ -89,32 +89,36 @@ in
     in (
       lib.nameValuePair "bor-${name}" (lib.mkIf cfg.enable {
         description = "Polygon Bor Node (${name})";
-        after = [ "network.target" ];
+        after = [ "network-online.target" ];
         wantedBy = [ "multi-user.target" ];
+        wants = [ "network-online.target" ];
 
         serviceConfig = {
+          ExecStart = ''
+            ${pkgs.bor}/bin/bor \
+              --datadir ${dataDir} \
+              --chain ${cfg.chain} \
+              --verbosity ${toString cfg.verbosity} \
+              --syncmode ${cfg.syncmode} \
+              --gcmode ${cfg.gcmode} \
+              --heimdall ${cfg.heimdall} \
+              --grpc ${cfg.grpcAddr} \
+              ${lib.optionalString cfg.logs "--log"} \
+              ${lib.escapeShellArgs cfg.extraArgs}
+          '';
           DynamicUser = true;
           Restart = "always";
+          RestartSec = 5;
           StateDirectory = "bor";
           ProtectSystem = "full";
           PrivateTmp = true;
           NoNewPrivileges = true;
           PrivateDevices = true;
           MemoryDenyWriteExecute = true;
+          StandardOutput = "journal";
+          StandardError = "journal";
+          User = "bor";
         };
-
-        script = ''
-          ${pkgs.bor}/bin/bor \
-            --datadir ${dataDir} \
-            --chain ${cfg.chain} \
-            --verbosity ${toString cfg.verbosity} \
-            --syncmode ${cfg.syncmode} \
-            --gcmode ${cfg.gcmode} \
-            --heimdall ${cfg.heimdall} \
-            --grpc ${cfg.grpcAddr} \
-            ${lib.optionalString cfg.logs "--log"} \
-            ${lib.escapeShellArgs cfg.extraArgs}
-        '';
       })
     )) config.services.bor;
   };
