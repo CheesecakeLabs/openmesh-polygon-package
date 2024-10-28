@@ -1,6 +1,8 @@
 { config, lib, pkgs, ... }:
 
 let
+  eachHeimdall = config.services.heimdall;
+
   heimdallOpts = { config, lib, name, ... }: {
     options = {
       enable = lib.mkEnableOption "Polygon Heimdall Node";
@@ -11,45 +13,26 @@ let
         description = "Chain ID of the Polygon network (e.g., 137 for mainnet, 80001 for Mumbai testnet).";
       };
 
-      configFile = lib.mkOption {
-        type = lib.types.path;
-        description = "Path to the TOML configuration file for Heimdall.";
-      };
-
       datadir = lib.mkOption {
         type = lib.types.str;
         default = "/var/lib/heimdall";
         description = "Path to the Heimdall data directory.";
       };
 
-      db-backend = lib.mkOption {
-        type = lib.types.str;
-        default = "leveldb";
-        description = "Database backend used by Heimdall ('leveldb' or 'pebble').";
+      rpc = {
+        address = lib.mkOption {
+          type = lib.types.str;
+          default = "127.0.0.1:1317";
+          description = "Address for the RPC API.";
+        };
       };
 
-      rpc-address = lib.mkOption {
-        type = lib.types.str;
-        default = "127.0.0.1";
-        description = "Listen address for Heimdall RPC API.";
-      };
-
-      rpc-port = lib.mkOption {
-        type = lib.types.port;
-        default = 1317;
-        description = "Port for Heimdall RPC API.";
-      };
-
-      grpc-address = lib.mkOption {
-        type = lib.types.str;
-        default = "127.0.0.1";
-        description = "Address for Heimdall gRPC API.";
-      };
-
-      grpc-port = lib.mkOption {
-        type = lib.types.port;
-        default = 9090;
-        description = "Port for Heimdall gRPC API.";
+      grpc = {
+        address = lib.mkOption {
+          type = lib.types.str;
+          default = "127.0.0.1:9090";
+          description = "Address for the gRPC API.";
+        };
       };
 
       validator = lib.mkOption {
@@ -63,22 +46,16 @@ let
         description = "Path to the keystore directory containing the validator key.";
       };
 
-      seeds = lib.mkOption {
-        type = lib.types.str;
-        default = "seed1.polygon.io:26656,seed2.polygon.io:26656";
-        description = "Seed nodes for connecting Heimdall to the Polygon network.";
-      };
-
       log-level = lib.mkOption {
         type = lib.types.str;
         default = "info";
         description = "Log level for Heimdall (trace|debug|info|warn|error|crit).";
       };
 
-      verbosity = lib.mkOption {
-        type = lib.types.int;
-        default = 3;
-        description = "Logging verbosity for Heimdall (5=trace, 4=debug, 3=info, 2=warn, 1=error, 0=crit).";
+      seeds = lib.mkOption {
+        type = lib.types.str;
+        default = "seed1.polygon.io:26656,seed2.polygon.io:26656";
+        description = "Seed nodes for connecting Heimdall to the Polygon network.";
       };
 
       snapshot = lib.mkOption {
@@ -99,66 +76,73 @@ let
         description = "Enable fast sync mode.";
       };
 
-      network = lib.mkOption {
-        type = lib.types.str;
-        default = "mainnet";
-        description = "The network type (e.g., 'mainnet', 'mumbai').";
+      verbosity = lib.mkOption {
+        type = lib.types.int;
+        default = 3;
+        description = "Logging verbosity for Heimdall.";
       };
 
       extraArgs = lib.mkOption {
         type = lib.types.listOf lib.types.str;
         default = [];
-        description = "Additional arguments to pass to the Heimdall executable.";
+        description = "Additional arguments for the Heimdall executable.";
       };
+
+      package = lib.mkPackageOption pkgs [ "heimdall" ] { };
     };
   };
-in
-{
-  options.services.heimdall = lib.mkOption {
-    type = lib.types.attrsOf (lib.types.submodule heimdallOpts);
-    default = {};
-    description = "Configuration for Polygon Heimdall nodes.";
+
+in {
+  ###### Interface
+  options = {
+    services.heimdall = lib.mkOption {
+      type = lib.types.attrsOf (lib.types.submodule heimdallOpts);
+      default = {};
+      description = "Configuration for one or more Heimdall node instances.";
+    };
   };
 
-  config = lib.mkIf (config.services.heimdall != {}) {
+  ###### Implementation
+  config = lib.mkIf (eachHeimdall != {}) {
     environment.systemPackages = lib.flatten (lib.mapAttrsToList (name: cfg: [
-      pkgs.heimdall
-    ]) config.services.heimdall);
+      cfg.package
+    ]) eachHeimdall);
 
     systemd.services = lib.mapAttrs' (name: cfg: let
-      dataDir = cfg.datadir;
+      stateDir = "polygon/heimdall/${name}";
+      dataDir = "/var/lib/${stateDir}";
     in (
       lib.nameValuePair "heimdall-${name}" (lib.mkIf cfg.enable {
         description = "Polygon Heimdall Node (${name})";
-        after = [ "network-online.target" ];
         wantedBy = [ "multi-user.target" ];
+        after = [ "network-online.target" ];
         wants = [ "network-online.target" ];
 
         serviceConfig = {
           ExecStart = ''
-            ${pkgs.heimdall}/bin/heimdalld \
+            ${cfg.package}/bin/heimdalld \
               --datadir ${dataDir} \
               --chain-id ${toString cfg.chain-id} \
-              --rpc.address ${cfg.rpc-address} \
-              --rpc.port ${toString cfg.rpc-port} \
-              --grpc.address ${cfg.grpc-address} \
-              --grpc.port ${toString cfg.grpc-port} \
+              --rpc.address ${cfg.rpc.address} \
+              --grpc.address ${cfg.grpc.address} \
               ${lib.optionalString (cfg.validator != null) "--validator ${cfg.validator}"} \
               --keystore ${cfg.keystore} \
-              --seeds ${cfg.seeds} \
               --log-level ${cfg.log-level} \
-              --verbosity ${toString cfg.verbosity} \
+              --seeds ${cfg.seeds} \
               ${lib.optionalString cfg.snapshot "--snapshot"} \
               ${lib.optionalString cfg.tx-index "--tx-index"} \
               ${lib.optionalString cfg.fast-sync "--fast-sync"} \
+              --verbosity ${toString cfg.verbosity} \
               ${lib.escapeShellArgs cfg.extraArgs}
           '';
           DynamicUser = true;
           Restart = "always";
           RestartSec = 5;
-          StateDirectory = "heimdall";
-          ProtectSystem = "full";
+          StateDirectory = stateDir;
+
+          # Hardening options
           PrivateTmp = true;
+          ProtectSystem = "full";
           NoNewPrivileges = true;
           PrivateDevices = true;
           MemoryDenyWriteExecute = true;
@@ -167,6 +151,6 @@ in
           User = "heimdall";
         };
       })
-    )) config.services.heimdall;
+    )) eachHeimdall;
   };
 }
