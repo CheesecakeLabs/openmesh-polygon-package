@@ -96,7 +96,7 @@ in {
 
         serviceConfig = {
           ExecStart = ''
-            ${cfg.package}/bin/bor \
+            ${cfg.package}/bin/bor server \
               --datadir ${dataDir} \
               --chain ${cfg.chain} \
               --syncmode ${cfg.syncmode} \
