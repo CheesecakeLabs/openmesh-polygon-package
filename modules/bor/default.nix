@@ -32,11 +32,6 @@ let
           default = "127.0.0.1";
           description = "Address for the GRPC API.";
         };
-        port = lib.mkOption {
-          type = lib.types.port;
-          default = 3131;
-          description = "Port for the GRPC API.";
-        };
       };
 
       verbosity = lib.mkOption {
@@ -102,8 +97,7 @@ in {
               --syncmode ${cfg.syncmode} \
               --gcmode ${cfg.gcmode} \
               --grpc.addr ${cfg.grpc.address} \
-              --grpc.port ${toString cfg.grpc.port} \
-              --heimdall ${cfg.heimdallUrl} \
+              --bor.heimdall ${cfg.heimdallUrl} \
               --verbosity ${toString cfg.verbosity} \
               ${lib.optionalString cfg.logs "--log"} \
               ${lib.escapeShellArgs cfg.extraArgs}
