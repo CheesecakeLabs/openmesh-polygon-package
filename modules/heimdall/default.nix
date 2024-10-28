@@ -1,7 +1,7 @@
 { config, lib, pkgs, ... }:
 
 let
-  eachHeimdall = config.services.heimdall;
+  eachHeimdall = config.services.heimdall-polygon;
 
   heimdallOpts = { config, lib, name, ... }: {
     options = {
@@ -112,7 +112,7 @@ in {
       stateDir = "polygon/heimdall/${name}";
       dataDir = "/var/lib/${stateDir}";
     in (
-      lib.nameValuePair "heimdall-${name}" (lib.mkIf cfg.enable {
+      lib.nameValuePair "heimdall-polygon-${name}" (lib.mkIf cfg.enable {
         description = "Polygon Heimdall Node (${name})";
         wantedBy = [ "multi-user.target" ];
         after = [ "network-online.target" ];
