@@ -101,7 +101,7 @@ in {
               --chain ${cfg.chain} \
               --syncmode ${cfg.syncmode} \
               --gcmode ${cfg.gcmode} \
-              --grpc.address ${cfg.grpc.address} \
+              --grpc.addr ${cfg.grpc.address} \
               --grpc.port ${toString cfg.grpc.port} \
               --heimdall ${cfg.heimdallUrl} \
               --verbosity ${toString cfg.verbosity} \
